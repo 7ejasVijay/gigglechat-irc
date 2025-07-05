@@ -1,10 +1,15 @@
 use anyhow::Result;
 use iroh::{Endpoint, SecretKey, protocol::Router, NodeId};
-use iroh_gossip::{net::Gossip, proto::TopicId, net::ProtoEvent};
+use iroh_gossip::{net::Gossip, proto::TopicId};
 use iroh_gossip::api::{Event, GossipReceiver};
 use serde::{Serialize, Deserialize};
 use std::collections::HashMap;
 use futures_lite::StreamExt;
+
+use iroh::NodeAddr;
+use std::fmt;
+use std::str::FromStr;
+use iroh::Watcher;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -16,6 +21,13 @@ async fn main() -> Result<()> {
     // Create a new topic
     let id = TopicId::from_bytes(rand::random());
     let node_ids = vec![];
+
+    let ticket = {
+        let me = endpoint.node_addr().initialized().await?;
+        let nodes = vec![me];
+        Ticket { topic: id, nodes }
+    };
+    println!("> Ticket to join us: {ticket}");
 
     // Subscribe to the topic
     let topic = gossip.subscribe(id, node_ids).await?;
@@ -114,5 +126,37 @@ fn input_loop(line_tx: tokio::sync::mpsc::Sender<String>) -> Result<()> {
         stdin.read_line(&mut buffer)?;
         line_tx.blocking_send(buffer.clone())?;
         buffer.clear();
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct Ticket {
+    topic: TopicId,
+    nodes: Vec<NodeAddr>
+}
+
+impl Ticket {
+    fn from_bytes(bytes: &[u8]) -> Result<Self> {
+        serde_json::from_slice(bytes).map_err(Into::into)
+    }
+
+    pub fn to_bytes(&self) -> Vec<u8> {
+        serde_json::to_vec(self).expect("serde_json::to_vec is infallible")
+    }
+}
+
+impl fmt::Display for Ticket {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let mut text = data_encoding::BASE32_NOPAD.encode(&self.to_bytes()[..]);
+        text.make_ascii_lowercase();
+        write!(f, "{}", text)
+    }
+}
+
+impl FromStr for Ticket {
+    type Err = anyhow::Error;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let bytes = data_encoding::BASE32_NOPAD.decode(s.to_ascii_uppercase().as_bytes())?;
+        Self::from_bytes(&bytes)
     }
 }
