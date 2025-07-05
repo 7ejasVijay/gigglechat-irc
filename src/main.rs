@@ -34,6 +34,23 @@ async fn main() -> Result<()> {
     // Subscribe and print loop
     tokio::spawn(subscribe_loop(receiver));
 
+    let (line_tx, mut line_rx) = tokio::sync::mpsc::channel(1);
+    std::thread::spawn(move || input_loop(line_tx));
+
+    // broadcast each line we type
+    println!("> type a message and hit enter to broadcast...");
+
+    while let Some(text) = line_rx.recv().await {
+
+        let message = Message::new(MessageBody::Message {
+            from: endpoint.node_id(),
+            text: text.clone()
+        });
+
+        sender.broadcast(message.to_vec().into()).await?;
+        println!("> sent: {text}");
+    }
+
     // Cleanly shutdown the router
     router.shutdown().await?;
 
@@ -88,4 +105,14 @@ async fn subscribe_loop(mut receiver: GossipReceiver) -> Result<()> {
     }
 
     Ok(())
+}
+
+fn input_loop(line_tx: tokio::sync::mpsc::Sender<String>) -> Result<()> {
+    let mut buffer = String::new();
+    let stdin = std::io::stdin();
+    loop {
+        stdin.read_line(&mut buffer)?;
+        line_tx.blocking_send(buffer.clone())?;
+        buffer.clear();
+    }
 }
