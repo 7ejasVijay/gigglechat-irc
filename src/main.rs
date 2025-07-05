@@ -1,7 +1,10 @@
 use anyhow::Result;
 use iroh::{Endpoint, SecretKey, protocol::Router, NodeId};
-use iroh_gossip::{net::Gossip, proto::TopicId};
+use iroh_gossip::{net::Gossip, proto::TopicId, net::ProtoEvent};
+use iroh_gossip::api::{Event, GossipReceiver};
 use serde::{Serialize, Deserialize};
+use std::collections::HashMap;
+use futures_lite::StreamExt;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -18,7 +21,7 @@ async fn main() -> Result<()> {
     let topic = gossip.subscribe(id, node_ids).await?;
     
     // Get the GossipSender and the GossipReceiver
-    let (mut sender, _receiver) = topic.split();
+    let (mut sender, receiver) = topic.split();
 
     let message = Message::new(MessageBody::AboutMe {
         from: endpoint.node_id(),
@@ -27,6 +30,9 @@ async fn main() -> Result<()> {
 
     // Broadcast a message to the topic
     sender.broadcast(message.to_vec().into()).await?;
+
+    // Subscribe and print loop
+    tokio::spawn(subscribe_loop(receiver));
 
     // Cleanly shutdown the router
     router.shutdown().await?;
@@ -61,4 +67,25 @@ impl Message {
     pub fn to_vec(&self) -> Vec<u8> {
         serde_json::to_vec(self).expect("serde_json::to_vec is infallible")
     }
+}
+
+async fn subscribe_loop(mut receiver: GossipReceiver) -> Result<()> {
+    let mut names: HashMap<NodeId, String> = HashMap::new();
+
+    while let Some(event) = receiver.try_next().await? {
+        if let Event::Received(msg) = event {
+            match Message::from_bytes(&msg.content)?.body {
+                MessageBody::AboutMe { from, name } => {
+                    names.insert(from, name.clone());
+                    println!("> {} is now known as {}", from.fmt_short(), name);
+                }
+                MessageBody::Message { from, text } => {
+                    let name = names.get(&from).map_or_else(|| from.fmt_short(), String::to_string);
+                    println!("{}: {}", name, text);
+                }
+            }
+        }
+    }
+
+    Ok(())
 }
