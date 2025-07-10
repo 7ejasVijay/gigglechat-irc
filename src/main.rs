@@ -5,6 +5,7 @@ use iroh_gossip::api::{Event, GossipReceiver};
 use serde::{Serialize, Deserialize};
 use std::collections::HashMap;
 use futures_lite::StreamExt;
+use clap::Parser;
 
 use iroh::NodeAddr;
 use std::fmt;
@@ -67,6 +68,24 @@ async fn main() -> Result<()> {
     router.shutdown().await?;
 
     Ok(())
+}
+
+#[derive(Parser, Debug)]
+struct Args {
+    #[clap(short, long)]
+    name: Option<String>,
+    #[clap(short, long, default_value = "0")]
+    bind_port: u16,
+    #[clap(subcommand)]
+    command: Command
+}
+
+#[derive(Parser, Debug)]
+enum Command {
+    Open,
+    Join {
+        ticket: String
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
